@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from torch import optim
+from sklearn.preprocessing import StandardScaler
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -10,7 +11,8 @@ import numpy as np
 import utility as util
 from modules import Encoder, Decoder
 
-from types import TrainConfig, TrainData, DaRnnNet
+import typing
+import collections
 
 logger = util.setup_log()
 
@@ -18,15 +20,36 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 logger.info("Using computation device %s.", device)
 
 
+class TrainConfig(typing.NamedTuple):
+    T: int
+    train_size: int
+    batch_size: int
+    loss_func: typing.Callable
+
+
+class TrainData(typing.NamedTuple):
+    feats: np.ndarray
+    targs: np.ndarray
+
+
+DaRnnNet = collections.namedtuple("DaRnnNet", ["encoder", "decoder", "enc_opt", "dec_opt"])
+
+
 def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
-           T=10, learning_rate=0.01, batch_size=128, parallel=True, debug=False):
+           T=10, learning_rate=0.01, batch_size=128, debug=False):
     dat = pd.read_csv(file_nm, nrows=100 if debug else None)
     logger.info(f"Shape of data: {dat.shape}.\nMissing in data: {dat.isnull().sum().sum()}.")
 
-    # TODO: Normalize the data?
-    # TODO: there's probably a more elegant way to index this
-    train_data = TrainData(dat.loc[:, [x for x in dat.columns.tolist() if x != 'NDX']].as_matrix(),
-                           np.array(dat.NDX))
+    scaler = StandardScaler().fit(dat)
+    proc_dat = scaler.transform(dat)
+
+    col_idx = list(dat.columns).index("NDX")
+    mask = np.ones(proc_dat.shape[1], dtype=bool)
+    mask[col_idx] = False
+    feats = proc_dat[:, mask]
+    targs = proc_dat[:, ~mask]
+    train_data = TrainData(feats, targs.squeeze())
+
     train_cfg = TrainConfig(T, int(train_data.feats.shape[0] * 0.7), batch_size, nn.MSELoss)
     logger.info(f"Training size: {train_cfg.train_size:d}.")
 
@@ -36,9 +59,6 @@ def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
     decoder = Decoder(encoder_hidden_size=encoder_hidden_size,
                       decoder_hidden_size=decoder_hidden_size,
                       T=T, logger=logger).to(device)
-    if parallel:
-        encoder = nn.DataParallel(encoder)
-        decoder = nn.DataParallel(decoder)
 
     encoder_optimizer = optim.Adam(
         params=[p for p in encoder.parameters() if p.requires_grad],
@@ -51,7 +71,7 @@ def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
     return train_cfg, train_data, da_rnn_net
 
 
-def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10):
+def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10, save_plots=False):
     iter_per_epoch = int(np.ceil(t_cfg.train_size * 1. / t_cfg.batch_size))
     iter_losses = np.zeros(n_epochs * iter_per_epoch)
     epoch_losses = np.zeros(n_epochs)
@@ -63,28 +83,16 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10)
         j = 0
 
         while j < t_cfg.train_size:
-            batch_idx = perm_idx[j:(j + t_cfg.batch_size)]
-            X = np.zeros((len(batch_idx), t_cfg.T - 1, train_data.feats.shape[1]))
-            y_history = np.zeros((len(batch_idx), t_cfg.T - 1))
-            y_target = train_data.targs[batch_idx + t_cfg.T]
+            feats, y_history, y_target = prep_train_data(j, perm_idx, t_cfg, train_data)
 
-            for k in range(len(batch_idx)):
-                X[k, :, :] = train_data.feats[batch_idx[k]: (batch_idx[k] + t_cfg.T - 1), :]
-                y_history[k, :] = train_data.targs[batch_idx[k]: (batch_idx[k] + t_cfg.T - 1)]
-
-            loss = train_iteration(net, t_cfg.loss_func, X, y_history, y_target)
+            loss = train_iteration(net, t_cfg.loss_func, feats, y_history, y_target)
             iter_losses[i * iter_per_epoch + j // t_cfg.batch_size] = loss
             # if (j / t_cfg.batch_size) % 50 == 0:
             #    self.logger.info("Epoch %d, Batch %d: loss = %3.3f.", i, j / t_cfg.batch_size, loss)
             j += t_cfg.batch_size
             n_iter += 1
 
-            # TODO: Where did this Learning Rate adjusment schedule come from? Why not just use the Cosine?
-            if n_iter % 10000 == 0 and n_iter > 0:
-                for param_group in net.enc_opt.param_groups:
-                    param_group['lr'] = param_group['lr'] * 0.9
-                for param_group in net.dec_opt.param_groups:
-                    param_group['lr'] = param_group['lr'] * 0.9
+            adjust_learning_rate(net, n_iter)
 
         epoch_losses[i] = np.mean(iter_losses[range(i * iter_per_epoch, (i + 1) * iter_per_epoch)])
         if i % 10 == 0:
@@ -105,12 +113,33 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10)
             plt.plot(range(t_cfg.T + len(y_train_pred), len(train_data.targs) + 1), y_test_pred,
                      label='Predicted - Test')
             plt.legend(loc='upper left')
-            plt.show()
+            util.save_or_show_plot(f"pred_{i}.png", save_plots)
 
-        return iter_losses, epoch_losses
+    return iter_losses, epoch_losses
 
 
-def train_iteration(t_net: DaRnnNet, loss_func, X, y_history, y_target):
+def prep_train_data(j: int, perm_idx, t_cfg: TrainConfig, train_data: TrainData):
+    batch_idx = perm_idx[j:(j + t_cfg.batch_size)]
+    feats = np.zeros((len(batch_idx), t_cfg.T - 1, train_data.feats.shape[1]))
+    y_history = np.zeros((len(batch_idx), t_cfg.T - 1))
+    y_target = train_data.targs[batch_idx + t_cfg.T]
+
+    for k in range(len(batch_idx)):
+        feats[k, :, :] = train_data.feats[batch_idx[k]: (batch_idx[k] + t_cfg.T - 1), :]
+        y_history[k, :] = train_data.targs[batch_idx[k]: (batch_idx[k] + t_cfg.T - 1)]
+
+    return feats, y_history, y_target
+
+
+def adjust_learning_rate(net: DaRnnNet, n_iter: int):
+    # TODO: Where did this Learning Rate adjustment schedule come from? Why not just use the Cosine?
+    if n_iter % 10000 == 0 and n_iter > 0:
+        for enc_params, dec_params in zip(net.enc_opt.param_groups, net.dec_opt.param_groups):
+            enc_params['lr'] = enc_params['lr'] * 0.9
+            dec_params['lr'] = dec_params['lr'] * 0.9
+
+
+def train_iteration(t_net: DaRnnNet, loss_func: typing.Callable, X, y_history, y_target):
     t_net.enc_opt.zero_grad()
     t_net.dec_opt.zero_grad()
 
@@ -162,20 +191,22 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
     return y_pred
 
 
-config, data, model = da_rnn(file_nm='data/nasdaq100_padding.csv', parallel=False, learning_rate=.001)
-iter_loss, epoch_loss = train(model, data, config, n_epochs=500)
+save_plots = True
+
+config, data, model = da_rnn(file_nm='data/nasdaq100_padding.csv', learning_rate=.001)
+iter_loss, epoch_loss = train(model, data, config, n_epochs=500, save_plots=save_plots)
 final_y_pred = predict(model, data, config.train_size, config.batch_size, config.T)
 
 plt.figure()
 plt.semilogy(range(len(iter_loss)), iter_loss)
-plt.show()
+util.save_or_show_plot("iter_loss.png", save_plots)
 
 plt.figure()
 plt.semilogy(range(len(epoch_loss)), epoch_loss)
-plt.show()
+util.save_or_show_plot("epoch_loss.png", save_plots)
 
 plt.figure()
 plt.plot(final_y_pred, label='Predicted')
 plt.plot(data.targs[config.train_size:], label="True")
 plt.legend(loc='upper left')
-plt.show()
+util.save_or_show_plot("final_predicted.png", save_plots)

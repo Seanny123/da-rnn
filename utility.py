@@ -1,4 +1,7 @@
 import logging
+import os
+
+import matplotlib.pyplot as plt
 
 
 def setup_log(tag='VOC_TOPICS'):
@@ -18,3 +21,10 @@ def setup_log(tag='VOC_TOPICS'):
     # logger.handlers = []
     logger.addHandler(ch)
     return logger
+
+
+def save_or_show_plot(file_nm: str, save: bool):
+    if save:
+        plt.savefig(os.path.join(__file__, "plots", file_nm))
+    else:
+        plt.show()
