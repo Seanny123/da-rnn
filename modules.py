@@ -5,10 +5,13 @@ from torch.nn import functional as tf
 
 
 class Encoder(nn.Module):
-    def __init__(self, input_size, hidden_size, T, logger):
-        # input size: number of underlying factors (81)
-        # T: number of time steps (10)
-        # hidden_size: dimension of the hidden state
+
+    def __init__(self, input_size: int, hidden_size: int, T: int, logger):
+        """
+        input size: number of underlying factors (81)
+        T: number of time steps (10)
+        hidden_size: dimension of the hidden state
+        """
         super(Encoder, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size

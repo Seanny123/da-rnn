@@ -6,7 +6,6 @@ from torch import optim
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import itertools
 
 import utility as util
 from modules import Encoder, Decoder
@@ -26,12 +25,14 @@ class DaRnn:
         self.logger = logger
         self.logger.info("Shape of data: %s.\nMissing in data: %s.", dat.shape, dat.isnull().sum().sum())
 
+        # TODO: Normalize the data?
         self.X = dat.loc[:, [x for x in dat.columns.tolist() if x != 'NDX']].as_matrix()
         self.y = np.array(dat.NDX)
         self.batch_size = batch_size
 
-        self.encoder = Encoder(input_size=self.X.shape[1], hidden_size=encoder_hidden_size, T=T,
-                               logger=logger).to(device)
+        self.encoder = Encoder(input_size=self.X.shape[1],
+                               hidden_size=encoder_hidden_size,
+                               T=T, logger=logger).to(device)
         self.decoder = Decoder(encoder_hidden_size=encoder_hidden_size,
                                decoder_hidden_size=decoder_hidden_size,
                                T=T, logger=logger).to(device)
@@ -41,30 +42,29 @@ class DaRnn:
             self.decoder = nn.DataParallel(self.decoder)
 
         self.encoder_optimizer = optim.Adam(
-            params=itertools.filterfalse(lambda p: not p.requires_grad, self.encoder.parameters()),
+            params=[p for p in self.encoder.parameters() if p.requires_grad],
             lr=learning_rate)
         self.decoder_optimizer = optim.Adam(
-            params=itertools.filterfalse(lambda p: not p.requires_grad, self.decoder.parameters()),
+            params=[p for p in self.decoder.parameters() if p.requires_grad],
             lr=learning_rate)
-        # self.learning_rate = learning_rate
 
         self.train_size = int(self.X.shape[0] * 0.7)
-        self.y = self.y - np.mean(self.y[:self.train_size])  # Question: why Adam requires data to be normalized?
+        self.y = self.y - np.mean(self.y[:self.train_size])
         self.logger.info("Training size: %d.", self.train_size)
-
-    def train(self, n_epochs=10):
-        iter_per_epoch = int(np.ceil(self.train_size * 1. / self.batch_size))
-        logger.info("Iterations per epoch: %3.3f ~ %d.", self.train_size * 1. / self.batch_size, iter_per_epoch)
-        self.iter_losses = np.zeros(n_epochs * iter_per_epoch)
-        self.epoch_losses = np.zeros(n_epochs)
 
         self.loss_func = nn.MSELoss()
 
+    def train(self, n_epochs=10):
+        iter_per_epoch = int(np.ceil(self.train_size * 1. / self.batch_size))
+        iter_losses = np.zeros(n_epochs * iter_per_epoch)
+        epoch_losses = np.zeros(n_epochs)
+        logger.info("Iterations per epoch: %3.3f ~ %d.", self.train_size * 1. / self.batch_size, iter_per_epoch)
         n_iter = 0
 
         for i in range(n_epochs):
             perm_idx = np.random.permutation(self.train_size - self.T)
             j = 0
+
             while j < self.train_size:
                 batch_idx = perm_idx[j:(j + self.batch_size)]
                 X = np.zeros((len(batch_idx), self.T - 1, self.X.shape[1]))
@@ -76,7 +76,7 @@ class DaRnn:
                     y_history[k, :] = self.y[batch_idx[k]: (batch_idx[k] + self.T - 1)]
 
                 loss = self.train_iteration(X, y_history, y_target)
-                self.iter_losses[i * iter_per_epoch + j // self.batch_size] = loss
+                iter_losses[i * iter_per_epoch + j // self.batch_size] = loss
                 # if (j / self.batch_size) % 50 == 0:
                 #    self.logger.info("Epoch %d, Batch %d: loss = %3.3f.", i, j / self.batch_size, loss)
                 j += self.batch_size
@@ -87,29 +87,22 @@ class DaRnn:
                         param_group['lr'] = param_group['lr'] * 0.9
                     for param_group in self.decoder_optimizer.param_groups:
                         param_group['lr'] = param_group['lr'] * 0.9
-                '''
-                if learning_rate > self.learning_rate:
-                    for param_group in self.encoder_optimizer.param_groups:
-                        param_group['lr'] = param_group['lr'] * .9
-                    for param_group in self.decoder_optimizer.param_groups:
-                        param_group['lr'] = param_group['lr'] * .9
-                    learning_rate *= .9
-                '''
 
-            self.epoch_losses[i] = np.mean(self.iter_losses[range(i * iter_per_epoch, (i + 1) * iter_per_epoch)])
+            epoch_losses[i] = np.mean(iter_losses[range(i * iter_per_epoch, (i + 1) * iter_per_epoch)])
             if i % 10 == 0:
-                self.logger.info("Epoch %d, loss: %3.3f.", i, self.epoch_losses[i])
+                self.logger.info("Epoch %d, loss: %3.3f.", i, epoch_losses[i])
 
             if i % 10 == 0:
                 y_train_pred = self.predict(on_train=True)
                 y_test_pred = self.predict(on_train=False)
-                y_pred = np.concatenate((y_train_pred, y_test_pred))
                 plt.figure()
                 plt.plot(range(1, 1 + len(self.y)), self.y, label="True")
                 plt.plot(range(self.T, len(y_train_pred) + self.T), y_train_pred, label='Predicted - Train')
                 plt.plot(range(self.T + len(y_train_pred), len(self.y) + 1), y_test_pred, label='Predicted - Test')
                 plt.legend(loc='upper left')
                 plt.show()
+
+        return iter_losses, epoch_losses
 
     def train_iteration(self, X, y_history, y_target):
         self.encoder_optimizer.zero_grad()
@@ -166,15 +159,15 @@ class DaRnn:
 
 model = DaRnn(file_data='data/nasdaq100_padding.csv', logger=logger, parallel=False,
               learning_rate=.001)
-model.train(n_epochs=500)
+iter_loss, epoch_loss = model.train(n_epochs=500)
 y_pred = model.predict()
 
 plt.figure()
-plt.semilogy(range(len(model.iter_losses)), model.iter_losses)
+plt.semilogy(range(len(iter_loss)), iter_loss)
 plt.show()
 
 plt.figure()
-plt.semilogy(range(len(model.epoch_losses)), model.epoch_losses)
+plt.semilogy(range(len(epoch_loss)), epoch_loss)
 plt.show()
 
 plt.figure()
