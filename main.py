@@ -139,20 +139,20 @@ class DaRnn:
         self.batch_size = batch_size
 
         self.encoder = Encoder(input_size=self.X.shape[1], hidden_size=encoder_hidden_size, T=T,
-                               logger=logger).cuda()
+                               logger=logger)
         self.decoder = Decoder(encoder_hidden_size=encoder_hidden_size,
                                decoder_hidden_size=decoder_hidden_size,
-                               T=T, logger=logger).cuda()
+                               T=T, logger=logger)
 
         if parallel:
             self.encoder = nn.DataParallel(self.encoder)
             self.decoder = nn.DataParallel(self.decoder)
 
         self.encoder_optimizer = optim.Adam(
-            params=itertools.ifilter(lambda p: p.requires_grad, self.encoder.parameters()),
+            params=itertools.filterfalse(lambda p: not p.requires_grad, self.encoder.parameters()),
             lr=learning_rate)
         self.decoder_optimizer = optim.Adam(
-            params=itertools.ifilter(lambda p: p.requires_grad, self.decoder.parameters()),
+            params=itertools.filterfalse(lambda p: not p.requires_grad, self.decoder.parameters()),
             lr=learning_rate)
         # self.learning_rate = learning_rate
 
@@ -184,7 +184,7 @@ class DaRnn:
                     y_history[k, :] = self.y[batch_idx[k]: (batch_idx[k] + self.T - 1)]
 
                 loss = self.train_iteration(X, y_history, y_target)
-                self.iter_losses[i * iter_per_epoch + j / self.batch_size] = loss
+                self.iter_losses[i * iter_per_epoch + j // self.batch_size] = loss
                 # if (j / self.batch_size) % 50 == 0:
                 #    self.logger.info("Epoch %d, Batch %d: loss = %3.3f.", i, j / self.batch_size, loss)
                 j += self.batch_size
@@ -223,11 +223,11 @@ class DaRnn:
         self.encoder_optimizer.zero_grad()
         self.decoder_optimizer.zero_grad()
 
-        input_weighted, input_encoded = self.encoder(Variable(torch.from_numpy(X).type(torch.FloatTensor).cuda()))
-        y_pred = self.decoder(input_encoded, Variable(torch.from_numpy(y_history).type(torch.FloatTensor).cuda()))
+        input_weighted, input_encoded = self.encoder(Variable(torch.from_numpy(X).type(torch.FloatTensor)))
+        y_pred = self.decoder(input_encoded, Variable(torch.from_numpy(y_history).type(torch.FloatTensor)))
 
-        y_true = Variable(torch.from_numpy(y_target).type(torch.FloatTensor).cuda())
-        loss = self.loss_func(y_pred, y_true)
+        y_true = Variable(torch.from_numpy(y_target).type(torch.FloatTensor))
+        loss = self.loss_func(y_pred.squeeze(), y_true)
         loss.backward()
 
         self.encoder_optimizer.step()
@@ -261,8 +261,8 @@ class DaRnn:
                     y_history[j, :] = self.y[
                         range(batch_idx[j] + self.train_size - self.T, batch_idx[j] + self.train_size - 1)]
 
-            y_history = Variable(torch.from_numpy(y_history).type(torch.FloatTensor).cuda())
-            _, input_encoded = self.encoder(Variable(torch.from_numpy(X).type(torch.FloatTensor).cuda()))
+            y_history = Variable(torch.from_numpy(y_history).type(torch.FloatTensor))
+            _, input_encoded = self.encoder(Variable(torch.from_numpy(X).type(torch.FloatTensor)))
             y_pred[i:(i + self.batch_size)] = self.decoder(input_encoded, y_history).cpu().data.numpy()[:, 0]
             i += self.batch_size
 
