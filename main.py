@@ -76,20 +76,19 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
     iter_losses = np.zeros(n_epochs * iter_per_epoch)
     epoch_losses = np.zeros(n_epochs)
     logger.info(f"Iterations per epoch: {t_cfg.train_size * 1. / t_cfg.batch_size:3.3f} ~ {iter_per_epoch:d}.")
+
     n_iter = 0
 
     for i in range(n_epochs):
         perm_idx = np.random.permutation(t_cfg.train_size - t_cfg.T)
-        j = 0
 
-        while j < t_cfg.train_size:
+        for j in range(0, t_cfg.train_size, t_cfg.batch_size):
             feats, y_history, y_target = prep_train_data(j, perm_idx, t_cfg, train_data)
 
             loss = train_iteration(net, t_cfg.loss_func, feats, y_history, y_target)
             iter_losses[i * iter_per_epoch + j // t_cfg.batch_size] = loss
             # if (j / t_cfg.batch_size) % 50 == 0:
             #    self.logger.info("Epoch %d, Batch %d: loss = %3.3f.", i, j / t_cfg.batch_size, loss)
-            j += t_cfg.batch_size
             n_iter += 1
 
             adjust_learning_rate(net, n_iter)
@@ -124,9 +123,10 @@ def prep_train_data(j: int, perm_idx, t_cfg: TrainConfig, train_data: TrainData)
     y_history = np.zeros((len(batch_idx), t_cfg.T - 1))
     y_target = train_data.targs[batch_idx + t_cfg.T]
 
-    for k in range(len(batch_idx)):
-        feats[k, :, :] = train_data.feats[batch_idx[k]: (batch_idx[k] + t_cfg.T - 1), :]
-        y_history[k, :] = train_data.targs[batch_idx[k]: (batch_idx[k] + t_cfg.T - 1)]
+    for b_i, b_idx in enumerate(batch_idx):
+        b_slc = slice(b_idx, (b_idx + t_cfg.T - 1))
+        feats[b_i, :, :] = train_data.feats[b_slc, :]
+        y_history[b_i, :] = train_data.targs[b_slc]
 
     return feats, y_history, y_target
 
@@ -167,26 +167,24 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
     else:
         y_pred = np.zeros(t_dat.feats.shape[0] - train_size)
 
-    i = 0
-    while i < len(y_pred):
-        batch_idx = np.array(range(len(y_pred)))[i: (i + batch_size)]
+    for y_i in range(0, len(y_pred), batch_size):
+        batch_idx = np.array(range(len(y_pred)))[y_i: (y_i + batch_size)]
         X = np.zeros((len(batch_idx), T - 1, t_dat.feats.shape[1]))
         y_history = np.zeros((len(batch_idx), T - 1))
 
-        for j in range(len(batch_idx)):
+        for b_i, b_idx in enumerate(batch_idx):
             if on_train:
-                idx = range(batch_idx[j], batch_idx[j] + T - 1)
+                idx = range(b_idx, b_idx + T - 1)
             else:
-                idx = range(batch_idx[j] + train_size - T, batch_idx[j] + train_size - 1)
+                idx = range(b_idx + train_size - T, b_idx + train_size - 1)
 
-            X[j, :, :] = t_dat.feats[idx, :]
-            y_history[j, :] = t_dat.targs[idx]
+            X[b_i, :, :] = t_dat.feats[idx, :]
+            y_history[b_i, :] = t_dat.targs[idx]
 
         y_history = Variable(torch.from_numpy(y_history).type(torch.FloatTensor)).to(device)
         _, input_encoded = t_net.encoder(
             Variable(torch.from_numpy(X).type(torch.FloatTensor)).to(device))
-        y_pred[i:(i + batch_size)] = t_net.decoder(input_encoded, y_history).cpu().data.numpy()[:, 0]
-        i += batch_size
+        y_pred[y_i:(y_i + batch_size)] = t_net.decoder(input_encoded, y_history).cpu().data.numpy()[:, 0]
 
     return y_pred
 
