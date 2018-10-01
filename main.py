@@ -158,7 +158,7 @@ def train_iteration(t_net: DaRnnNet, loss_func: typing.Callable, X, y_history, y
     # if loss.data[0] < 10:
     #     self.logger.info("MSE: %s, loss: %s.", loss.data, (y_pred[:, 0] - y_true).pow(2).mean())
 
-    return loss.data[0]
+    return loss.item()
 
 
 def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int, T: int, on_train=False):
