@@ -50,7 +50,7 @@ def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
     targs = proc_dat[:, ~mask]
     train_data = TrainData(feats, targs.squeeze())
 
-    train_cfg = TrainConfig(T, int(train_data.feats.shape[0] * 0.7), batch_size, nn.MSELoss)
+    train_cfg = TrainConfig(T, int(train_data.feats.shape[0] * 0.7), batch_size, nn.MSELoss())
     logger.info(f"Training size: {train_cfg.train_size:d}.")
 
     encoder = Encoder(input_size=train_data.feats.shape[1],
