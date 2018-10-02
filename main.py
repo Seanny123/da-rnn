@@ -132,7 +132,8 @@ def prep_train_data(j: int, perm_idx, t_cfg: TrainConfig, train_data: TrainData)
 
 
 def adjust_learning_rate(net: DaRnnNet, n_iter: int):
-    # TODO: Where did this Learning Rate adjustment schedule come from? Why not just use the Cosine?
+    # TODO: Where did this Learning Rate adjustment schedule come from?
+    # Should be modified to use Cosine Annealing with warm restarts https://www.jeremyjordan.me/nn-learning-rate/
     if n_iter % 10000 == 0 and n_iter > 0:
         for enc_params, dec_params in zip(net.enc_opt.param_groups, net.dec_opt.param_groups):
             enc_params['lr'] = enc_params['lr'] * 0.9
