@@ -17,7 +17,11 @@ import collections
 logger = util.setup_log()
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-logger.info("Using computation device %s.", device)
+logger.info(f"Using computation device: {device}")
+
+
+def numpy_to_tvar(x):
+    return Variable(torch.from_numpy(x).type(torch.FloatTensor).to(device))
 
 
 class TrainConfig(typing.NamedTuple):
@@ -79,25 +83,26 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
 
     n_iter = 0
 
-    for i in range(n_epochs):
+    for e_i in range(n_epochs):
         perm_idx = np.random.permutation(t_cfg.train_size - t_cfg.T)
 
-        for j in range(0, t_cfg.train_size, t_cfg.batch_size):
-            feats, y_history, y_target = prep_train_data(j, perm_idx, t_cfg, train_data)
+        for t_i in range(0, t_cfg.train_size, t_cfg.batch_size):
+            batch_idx = perm_idx[t_i:(t_i + t_cfg.batch_size)]
+            feats, y_history, y_target = prep_train_data(batch_idx, t_cfg, train_data)
 
             loss = train_iteration(net, t_cfg.loss_func, feats, y_history, y_target)
-            iter_losses[i * iter_per_epoch + j // t_cfg.batch_size] = loss
+            iter_losses[e_i * iter_per_epoch + t_i // t_cfg.batch_size] = loss
             # if (j / t_cfg.batch_size) % 50 == 0:
             #    self.logger.info("Epoch %d, Batch %d: loss = %3.3f.", i, j / t_cfg.batch_size, loss)
             n_iter += 1
 
             adjust_learning_rate(net, n_iter)
 
-        epoch_losses[i] = np.mean(iter_losses[range(i * iter_per_epoch, (i + 1) * iter_per_epoch)])
-        if i % 10 == 0:
-            logger.info("Epoch %d, loss: %3.3f.", i, epoch_losses[i])
+        epoch_losses[e_i] = np.mean(iter_losses[range(e_i * iter_per_epoch, (e_i + 1) * iter_per_epoch)])
+        if e_i % 10 == 0:
+            logger.info(f"Epoch {e_i:d}, loss: {epoch_losses[e_i]:3.3f}.")
 
-        if i % 10 == 0:
+        if e_i % 10 == 0:
             y_train_pred = predict(net, train_data,
                                    t_cfg.train_size, t_cfg.batch_size, t_cfg.T,
                                    on_train=True)
@@ -112,13 +117,12 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
             plt.plot(range(t_cfg.T + len(y_train_pred), len(train_data.targs) + 1), y_test_pred,
                      label='Predicted - Test')
             plt.legend(loc='upper left')
-            util.save_or_show_plot(f"pred_{i}.png", save_plots)
+            util.save_or_show_plot(f"pred_{e_i}.png", save_plots)
 
     return iter_losses, epoch_losses
 
 
-def prep_train_data(j: int, perm_idx, t_cfg: TrainConfig, train_data: TrainData):
-    batch_idx = perm_idx[j:(j + t_cfg.batch_size)]
+def prep_train_data(batch_idx: np.ndarray, t_cfg: TrainConfig, train_data: TrainData):
     feats = np.zeros((len(batch_idx), t_cfg.T - 1, train_data.feats.shape[1]))
     y_history = np.zeros((len(batch_idx), t_cfg.T - 1))
     y_target = train_data.targs[batch_idx + t_cfg.T]
@@ -144,12 +148,10 @@ def train_iteration(t_net: DaRnnNet, loss_func: typing.Callable, X, y_history, y
     t_net.enc_opt.zero_grad()
     t_net.dec_opt.zero_grad()
 
-    input_weighted, input_encoded = t_net.encoder(
-        Variable(torch.from_numpy(X).type(torch.FloatTensor).to(device)))
-    y_pred = t_net.decoder(input_encoded,
-                           Variable(torch.from_numpy(y_history).type(torch.FloatTensor).to(device)))
+    input_weighted, input_encoded = t_net.encoder(numpy_to_tvar(X))
+    y_pred = t_net.decoder(input_encoded, numpy_to_tvar(y_history))
 
-    y_true = Variable(torch.from_numpy(y_target).type(torch.FloatTensor)).to(device)
+    y_true = numpy_to_tvar(y_target)
     loss = loss_func(y_pred.squeeze(), y_true)
     loss.backward()
 
@@ -182,9 +184,8 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
             X[b_i, :, :] = t_dat.feats[idx, :]
             y_history[b_i, :] = t_dat.targs[idx]
 
-        y_history = Variable(torch.from_numpy(y_history).type(torch.FloatTensor)).to(device)
-        _, input_encoded = t_net.encoder(
-            Variable(torch.from_numpy(X).type(torch.FloatTensor)).to(device))
+        y_history = numpy_to_tvar(y_history)
+        _, input_encoded = t_net.encoder(numpy_to_tvar(X))
         y_pred[y_i:(y_i + batch_size)] = t_net.decoder(input_encoded, y_history).cpu().data.numpy()[:, 0]
 
     return y_pred

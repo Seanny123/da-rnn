@@ -4,6 +4,10 @@ from torch.autograd import Variable
 from torch.nn import functional as tf
 
 
+def init_hidden(x, hidden_size: int):
+    return Variable(x.data.new(1, x.size(0), hidden_size).zero_())
+
+
 class Encoder(nn.Module):
 
     def __init__(self, input_size: int, hidden_size: int, T: int, logger):
@@ -27,8 +31,8 @@ class Encoder(nn.Module):
         input_weighted = Variable(input_data.data.new(input_data.size(0), self.T - 1, self.input_size).zero_())
         input_encoded = Variable(input_data.data.new(input_data.size(0), self.T - 1, self.hidden_size).zero_())
         # hidden, cell: initial states with dimension hidden_size
-        hidden = self.init_hidden(input_data)  # 1 * batch_size * hidden_size
-        cell = self.init_hidden(input_data)
+        hidden = init_hidden(input_data, self.hidden_size)  # 1 * batch_size * hidden_size
+        cell = init_hidden(input_data, self.hidden_size)
         # hidden.requires_grad = False
         # cell.requires_grad = False
         for t in range(self.T - 1):
@@ -54,10 +58,6 @@ class Encoder(nn.Module):
 
         return input_weighted, input_encoded
 
-    def init_hidden(self, x):
-        # No matter whether CUDA is used, the returned variable will have the same type as x.
-        return Variable(x.data.new(1, x.size(0), self.hidden_size).zero_())  # dimension 0 is the batch dimension
-
 
 class Decoder(nn.Module):
     def __init__(self, encoder_hidden_size, decoder_hidden_size, T, logger):
@@ -81,8 +81,8 @@ class Decoder(nn.Module):
         # input_encoded: batch_size * T - 1 * encoder_hidden_size
         # y_history: batch_size * (T-1)
         # Initialize hidden and cell, 1 * batch_size * decoder_hidden_size
-        hidden = self.init_hidden(input_encoded)
-        cell = self.init_hidden(input_encoded)
+        hidden = init_hidden(input_encoded, self.decoder_hidden_size)
+        cell = init_hidden(input_encoded, self.decoder_hidden_size)
         # hidden.requires_grad = False
         # cell.requires_grad = False
         for t in range(self.T - 1):
@@ -108,6 +108,3 @@ class Decoder(nn.Module):
         y_pred = self.fc_final(torch.cat((hidden[0], context), dim=1))
         # self.logger.info("hidden %s context %s y_pred: %s", hidden[0][0][:10], context[0][:10], y_pred[:10])
         return y_pred
-
-    def init_hidden(self, x):
-        return Variable(x.data.new(1, x.size(0), self.decoder_hidden_size).zero_())
