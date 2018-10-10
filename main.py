@@ -99,10 +99,9 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
             adjust_learning_rate(net, n_iter)
 
         epoch_losses[e_i] = np.mean(iter_losses[range(e_i * iter_per_epoch, (e_i + 1) * iter_per_epoch)])
-        if e_i % 10 == 0:
-            logger.info(f"Epoch {e_i:d}, loss: {epoch_losses[e_i]:3.3f}.")
 
         if e_i % 10 == 0:
+            logger.info(f"Epoch {e_i:d}, loss: {epoch_losses[e_i]:3.3f}.")
             y_train_pred = predict(net, train_data,
                                    t_cfg.train_size, t_cfg.batch_size, t_cfg.T,
                                    on_train=True)
@@ -171,9 +170,11 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
         y_pred = np.zeros(t_dat.feats.shape[0] - train_size)
 
     for y_i in range(0, len(y_pred), batch_size):
-        batch_idx = np.array(range(len(y_pred)))[y_i: (y_i + batch_size)]
-        X = np.zeros((len(batch_idx), T - 1, t_dat.feats.shape[1]))
-        y_history = np.zeros((len(batch_idx), T - 1))
+        y_slc = slice(y_i, y_i + batch_size)
+        batch_idx = range(len(y_pred))[y_slc]
+        b_len = len(batch_idx)
+        X = np.zeros((b_len, T - 1, t_dat.feats.shape[1]))
+        y_history = np.zeros((b_len, T - 1))
 
         for b_i, b_idx in enumerate(batch_idx):
             if on_train:
@@ -186,7 +187,7 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
 
         y_history = numpy_to_tvar(y_history)
         _, input_encoded = t_net.encoder(numpy_to_tvar(X))
-        y_pred[y_i:(y_i + batch_size)] = t_net.decoder(input_encoded, y_history).cpu().data.numpy()[:, 0]
+        y_pred[y_slc] = t_net.decoder(input_encoded, y_history).cpu().data.numpy()[:, 0]
 
     return y_pred
 
