@@ -1,6 +1,9 @@
+import typing
+import json
+import os
+
 import torch
 from torch import nn
-from torch.autograd import Variable
 from torch import optim
 from sklearn.preprocessing import StandardScaler
 
@@ -8,35 +11,14 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
-import utility as util
+import utils
 from modules import Encoder, Decoder
+from custom_types import DaRnnNet, TrainData, TrainConfig
+from utils import numpy_to_tvar
+from constants import device
 
-import typing
-import collections
-
-logger = util.setup_log()
-
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+logger = utils.setup_log()
 logger.info(f"Using computation device: {device}")
-
-
-def numpy_to_tvar(x):
-    return Variable(torch.from_numpy(x).type(torch.FloatTensor).to(device))
-
-
-class TrainConfig(typing.NamedTuple):
-    T: int
-    train_size: int
-    batch_size: int
-    loss_func: typing.Callable
-
-
-class TrainData(typing.NamedTuple):
-    feats: np.ndarray
-    targs: np.ndarray
-
-
-DaRnnNet = collections.namedtuple("DaRnnNet", ["encoder", "decoder", "enc_opt", "dec_opt"])
 
 
 def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
@@ -57,12 +39,15 @@ def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
     train_cfg = TrainConfig(T, int(train_data.feats.shape[0] * 0.7), batch_size, nn.MSELoss())
     logger.info(f"Training size: {train_cfg.train_size:d}.")
 
-    encoder = Encoder(input_size=train_data.feats.shape[1],
-                      hidden_size=encoder_hidden_size,
-                      T=T, logger=logger).to(device)
-    decoder = Decoder(encoder_hidden_size=encoder_hidden_size,
-                      decoder_hidden_size=decoder_hidden_size,
-                      T=T, logger=logger).to(device)
+    enc_kwargs = {"input_size": train_data.feats.shape[1], "hidden_size": encoder_hidden_size, "T": T}
+    encoder = Encoder(**enc_kwargs).to(device)
+    with open(os.path.join("data", "enc_kwargs.json"), "w") as fi:
+        json.dump(enc_kwargs, fi, indent=4)
+
+    dec_kwargs = {"encoder_hidden_size": encoder_hidden_size, "decoder_hidden_size": decoder_hidden_size, "T": T}
+    decoder = Decoder(**dec_kwargs).to(device)
+    with open(os.path.join("data", "dec_kwargs.json"), "w") as fi:
+        json.dump(enc_kwargs, fi, indent=4)
 
     encoder_optimizer = optim.Adam(
         params=[p for p in encoder.parameters() if p.requires_grad],
@@ -116,7 +101,7 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
             plt.plot(range(t_cfg.T + len(y_train_pred), len(train_data.targs) + 1), y_test_pred,
                      label='Predicted - Test')
             plt.legend(loc='upper left')
-            util.save_or_show_plot(f"pred_{e_i}.png", save_plots)
+            utils.save_or_show_plot(f"pred_{e_i}.png", save_plots)
 
     return iter_losses, epoch_losses
 
@@ -195,19 +180,22 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
 save_plots = True
 
 config, data, model = da_rnn(file_nm='data/nasdaq100_padding.csv', learning_rate=.001)
-iter_loss, epoch_loss = train(model, data, config, n_epochs=500, save_plots=save_plots)
+iter_loss, epoch_loss = train(model, data, config, n_epochs=10, save_plots=save_plots)
 final_y_pred = predict(model, data, config.train_size, config.batch_size, config.T)
 
 plt.figure()
 plt.semilogy(range(len(iter_loss)), iter_loss)
-util.save_or_show_plot("iter_loss.png", save_plots)
+utils.save_or_show_plot("iter_loss.png", save_plots)
 
 plt.figure()
 plt.semilogy(range(len(epoch_loss)), epoch_loss)
-util.save_or_show_plot("epoch_loss.png", save_plots)
+utils.save_or_show_plot("epoch_loss.png", save_plots)
 
 plt.figure()
 plt.plot(final_y_pred, label='Predicted')
 plt.plot(data.targs[config.train_size:], label="True")
 plt.legend(loc='upper left')
-util.save_or_show_plot("final_predicted.png", save_plots)
+utils.save_or_show_plot("final_predicted.png", save_plots)
+
+torch.save(model.encoder.state_dict(), os.path.join("data", "encoder.torch"))
+torch.save(model.decoder.state_dict(), os.path.join("data", "decoder.torch"))

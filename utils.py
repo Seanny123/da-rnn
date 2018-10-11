@@ -2,6 +2,10 @@ import logging
 import os
 
 import matplotlib.pyplot as plt
+import torch
+from torch.autograd import Variable
+
+from constants import device
 
 
 def setup_log(tag='VOC_TOPICS'):
@@ -28,3 +32,7 @@ def save_or_show_plot(file_nm: str, save: bool):
         plt.savefig(os.path.join(os.path.dirname(__file__), "plots", file_nm))
     else:
         plt.show()
+
+
+def numpy_to_tvar(x):
+    return Variable(torch.from_numpy(x).type(torch.FloatTensor).to(device))
