@@ -5,10 +5,24 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.externals import joblib
 
 from modules import Encoder, Decoder
 from utils import numpy_to_tvar
 import utils
+from custom_types import TrainData
+
+
+def preprocess_data(dat, scale) -> TrainData:
+    proc_dat = scale.transform(dat)
+
+    col_idx = list(dat.columns).index("NDX")
+    mask = np.ones(proc_dat.shape[1], dtype=bool)
+    mask[col_idx] = False
+    feats = proc_dat[:, mask]
+    targs = proc_dat[:, ~mask]
+
+    return TrainData(feats, targs.squeeze())
 
 
 def predict(encoder, decoder, t_dat, batch_size: int, T: int):
@@ -34,7 +48,7 @@ def predict(encoder, decoder, t_dat, batch_size: int, T: int):
     return y_pred
 
 
-debug = True
+debug = False
 save_plots = False
 
 with open(os.path.join("data", "enc_kwargs.json"), "r") as fi:
@@ -47,12 +61,16 @@ with open(os.path.join("data", "dec_kwargs.json"), "r") as fi:
 dec = Decoder(**dec_kwargs)
 dec.load_state_dict(torch.load(os.path.join("data", "decoder.torch")))
 
-data = pd.read_csv(os.path.join("data", "nasdaq100_padding.csv"), nrows=100 if debug else None)
+scaler = joblib.load(os.path.join("data", "scaler.pkl"))
+raw_data = pd.read_csv(os.path.join("data", "nasdaq100_padding.csv"), nrows=100 if debug else None)
+data = preprocess_data(raw_data, scaler)
 
-final_y_pred = predict(enc, dec, data, 128, 10)
+with open(os.path.join("data", "da_rnn_kwargs.json"), "r") as fi:
+    da_rnn_kwargs = json.load(fi)
+final_y_pred = predict(enc, dec, data, **da_rnn_kwargs)
 
 plt.figure()
 plt.plot(final_y_pred, label='Predicted')
-plt.plot(data.targs, label="True")
+plt.plot(data.targs[(da_rnn_kwargs["T"]-1):], label="True")
 plt.legend(loc='upper left')
-utils.save_or_show_plot("final_predicted.png", save_plots)
+utils.save_or_show_plot("final_predicted_reloaded.png", save_plots)

@@ -1,4 +1,5 @@
 import typing
+from typing import Tuple
 import json
 import os
 
@@ -6,6 +7,7 @@ import torch
 from torch import nn
 from torch import optim
 from sklearn.preprocessing import StandardScaler
+from sklearn.externals import joblib
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -21,20 +23,21 @@ logger = utils.setup_log()
 logger.info(f"Using computation device: {device}")
 
 
-def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
-           T=10, learning_rate=0.01, batch_size=128, debug=False):
-    dat = pd.read_csv(file_nm, nrows=100 if debug else None)
-    logger.info(f"Shape of data: {dat.shape}.\nMissing in data: {dat.isnull().sum().sum()}.")
-
-    scaler = StandardScaler().fit(dat)
-    proc_dat = scaler.transform(dat)
+def preprocess_data(dat) -> Tuple[TrainData, StandardScaler]:
+    scale = StandardScaler().fit(dat)
+    proc_dat = scale.transform(dat)
 
     col_idx = list(dat.columns).index("NDX")
     mask = np.ones(proc_dat.shape[1], dtype=bool)
     mask[col_idx] = False
     feats = proc_dat[:, mask]
     targs = proc_dat[:, ~mask]
-    train_data = TrainData(feats, targs.squeeze())
+
+    return TrainData(feats, targs.squeeze()), scale
+
+
+def da_rnn(train_data: TrainData, encoder_hidden_size=64, decoder_hidden_size=64,
+           T=10, learning_rate=0.01, batch_size=128):
 
     train_cfg = TrainConfig(T, int(train_data.feats.shape[0] * 0.7), batch_size, nn.MSELoss())
     logger.info(f"Training size: {train_cfg.train_size:d}.")
@@ -47,7 +50,7 @@ def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
     dec_kwargs = {"encoder_hidden_size": encoder_hidden_size, "decoder_hidden_size": decoder_hidden_size, "T": T}
     decoder = Decoder(**dec_kwargs).to(device)
     with open(os.path.join("data", "dec_kwargs.json"), "w") as fi:
-        json.dump(enc_kwargs, fi, indent=4)
+        json.dump(dec_kwargs, fi, indent=4)
 
     encoder_optimizer = optim.Adam(
         params=[p for p in encoder.parameters() if p.requires_grad],
@@ -57,7 +60,7 @@ def da_rnn(file_nm: str, encoder_hidden_size=64, decoder_hidden_size=64,
         lr=learning_rate)
     da_rnn_net = DaRnnNet(encoder, decoder, encoder_optimizer, decoder_optimizer)
 
-    return train_cfg, train_data, da_rnn_net
+    return train_cfg, da_rnn_net
 
 
 def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10, save_plots=False):
@@ -178,8 +181,14 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
 
 
 save_plots = True
+debug = False
 
-config, data, model = da_rnn(file_nm='data/nasdaq100_padding.csv', learning_rate=.001)
+raw_data = pd.read_csv(os.path.join('data/nasdaq100_padding.csv'), nrows=100 if debug else None)
+logger.info(f"Shape of data: {raw_data.shape}.\nMissing in data: {raw_data.isnull().sum().sum()}.")
+data, scaler = preprocess_data(raw_data)
+
+da_rnn_kwargs = {"batch_size": 128, "T": 10}
+config, model = da_rnn(data, learning_rate=.001, **da_rnn_kwargs)
 iter_loss, epoch_loss = train(model, data, config, n_epochs=10, save_plots=save_plots)
 final_y_pred = predict(model, data, config.train_size, config.batch_size, config.T)
 
@@ -197,5 +206,9 @@ plt.plot(data.targs[config.train_size:], label="True")
 plt.legend(loc='upper left')
 utils.save_or_show_plot("final_predicted.png", save_plots)
 
+with open(os.path.join("data", "da_rnn_kwargs.json"), "w") as fi:
+    json.dump(da_rnn_kwargs, fi, indent=4)
+
+joblib.dump(scaler, os.path.join("data", "scaler.pkl"))
 torch.save(model.encoder.state_dict(), os.path.join("data", "encoder.torch"))
 torch.save(model.decoder.state_dict(), os.path.join("data", "decoder.torch"))
