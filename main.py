@@ -89,13 +89,14 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
         epoch_losses[e_i] = np.mean(iter_losses[range(e_i * iter_per_epoch, (e_i + 1) * iter_per_epoch)])
 
         if e_i % 10 == 0:
-            logger.info(f"Epoch {e_i:d}, loss: {epoch_losses[e_i]:3.3f}.")
-            y_train_pred = predict(net, train_data,
-                                   t_cfg.train_size, t_cfg.batch_size, t_cfg.T,
-                                   on_train=True)
             y_test_pred = predict(net, train_data,
                                   t_cfg.train_size, t_cfg.batch_size, t_cfg.T,
                                   on_train=False)
+            val_loss = y_test_pred - train_data.targs[t_cfg.train_size:]
+            logger.info(f"Epoch {e_i:d}, train loss: {epoch_losses[e_i]:3.3f}, val loss: {np.mean(np.abs(val_loss))}.")
+            y_train_pred = predict(net, train_data,
+                                   t_cfg.train_size, t_cfg.batch_size, t_cfg.T,
+                                   on_train=True)
             plt.figure()
             plt.plot(range(1, 1 + len(train_data.targs)), train_data.targs,
                      label="True")
