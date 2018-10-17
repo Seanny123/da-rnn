@@ -11,6 +11,7 @@ from modules import Encoder, Decoder
 from utils import numpy_to_tvar
 import utils
 from custom_types import TrainData
+from constants import device
 
 
 def preprocess_data(dat, scale) -> TrainData:
@@ -25,7 +26,7 @@ def preprocess_data(dat, scale) -> TrainData:
     return TrainData(feats, targs.squeeze())
 
 
-def predict(encoder, decoder, t_dat, batch_size: int, T: int):
+def predict(encoder, decoder, t_dat, batch_size: int, T: int) -> np.ndarray:
     y_pred = np.zeros(t_dat.feats.shape[0] - T + 1)
 
     for y_i in range(0, len(y_pred), batch_size):
@@ -54,12 +55,12 @@ save_plots = False
 with open(os.path.join("data", "enc_kwargs.json"), "r") as fi:
     enc_kwargs = json.load(fi)
 enc = Encoder(**enc_kwargs)
-enc.load_state_dict(torch.load(os.path.join("data", "encoder.torch")))
+enc.load_state_dict(torch.load(os.path.join("data", "encoder.torch"), map_location=device))
 
 with open(os.path.join("data", "dec_kwargs.json"), "r") as fi:
     dec_kwargs = json.load(fi)
 dec = Decoder(**dec_kwargs)
-dec.load_state_dict(torch.load(os.path.join("data", "decoder.torch")))
+dec.load_state_dict(torch.load(os.path.join("data", "decoder.torch"), map_location=device))
 
 scaler = joblib.load(os.path.join("data", "scaler.pkl"))
 raw_data = pd.read_csv(os.path.join("data", "nasdaq100_padding.csv"), nrows=100 if debug else None)
