@@ -23,20 +23,22 @@ logger = utils.setup_log()
 logger.info(f"Using computation device: {device}")
 
 
-def preprocess_data(dat) -> Tuple[TrainData, StandardScaler]:
+def preprocess_data(dat, col_names) -> Tuple[TrainData, StandardScaler]:
     scale = StandardScaler().fit(dat)
     proc_dat = scale.transform(dat)
 
-    col_idx = list(dat.columns).index("NDX")
     mask = np.ones(proc_dat.shape[1], dtype=bool)
-    mask[col_idx] = False
+    dat_cols = list(dat.columns)
+    for col_name in col_names:
+        mask[dat_cols.index(col_name)] = False
+
     feats = proc_dat[:, mask]
     targs = proc_dat[:, ~mask]
 
-    return TrainData(feats, targs.squeeze()), scale
+    return TrainData(feats, targs), scale
 
 
-def da_rnn(train_data: TrainData, encoder_hidden_size=64, decoder_hidden_size=64,
+def da_rnn(train_data: TrainData, n_targs: int, encoder_hidden_size=64, decoder_hidden_size=64,
            T=10, learning_rate=0.01, batch_size=128):
 
     train_cfg = TrainConfig(T, int(train_data.feats.shape[0] * 0.7), batch_size, nn.MSELoss())
@@ -47,7 +49,8 @@ def da_rnn(train_data: TrainData, encoder_hidden_size=64, decoder_hidden_size=64
     with open(os.path.join("data", "enc_kwargs.json"), "w") as fi:
         json.dump(enc_kwargs, fi, indent=4)
 
-    dec_kwargs = {"encoder_hidden_size": encoder_hidden_size, "decoder_hidden_size": decoder_hidden_size, "T": T}
+    dec_kwargs = {"encoder_hidden_size": encoder_hidden_size,
+                  "decoder_hidden_size": decoder_hidden_size, "T": T, "out_feats": n_targs}
     decoder = Decoder(**dec_kwargs).to(device)
     with open(os.path.join("data", "dec_kwargs.json"), "w") as fi:
         json.dump(dec_kwargs, fi, indent=4)
@@ -92,6 +95,7 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
             y_test_pred = predict(net, train_data,
                                   t_cfg.train_size, t_cfg.batch_size, t_cfg.T,
                                   on_train=False)
+            # TODO: make this MSE and make it work for multiple inputs
             val_loss = y_test_pred - train_data.targs[t_cfg.train_size:]
             logger.info(f"Epoch {e_i:d}, train loss: {epoch_losses[e_i]:3.3f}, val loss: {np.mean(np.abs(val_loss))}.")
             y_train_pred = predict(net, train_data,
@@ -112,7 +116,7 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
 
 def prep_train_data(batch_idx: np.ndarray, t_cfg: TrainConfig, train_data: TrainData):
     feats = np.zeros((len(batch_idx), t_cfg.T - 1, train_data.feats.shape[1]))
-    y_history = np.zeros((len(batch_idx), t_cfg.T - 1))
+    y_history = np.zeros((len(batch_idx), t_cfg.T - 1, train_data.targs.shape[1]))
     y_target = train_data.targs[batch_idx + t_cfg.T]
 
     for b_i, b_idx in enumerate(batch_idx):
@@ -140,7 +144,7 @@ def train_iteration(t_net: DaRnnNet, loss_func: typing.Callable, X, y_history, y
     y_pred = t_net.decoder(input_encoded, numpy_to_tvar(y_history))
 
     y_true = numpy_to_tvar(y_target)
-    loss = loss_func(y_pred.squeeze(), y_true)
+    loss = loss_func(y_pred, y_true)
     loss.backward()
 
     t_net.enc_opt.step()
@@ -153,17 +157,18 @@ def train_iteration(t_net: DaRnnNet, loss_func: typing.Callable, X, y_history, y
 
 
 def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int, T: int, on_train=False):
+    out_size = t_dat.targs.shape[1]
     if on_train:
-        y_pred = np.zeros(train_size - T + 1)
+        y_pred = np.zeros((train_size - T + 1, out_size))
     else:
-        y_pred = np.zeros(t_dat.feats.shape[0] - train_size)
+        y_pred = np.zeros((t_dat.feats.shape[0] - train_size, out_size))
 
     for y_i in range(0, len(y_pred), batch_size):
         y_slc = slice(y_i, y_i + batch_size)
         batch_idx = range(len(y_pred))[y_slc]
         b_len = len(batch_idx)
         X = np.zeros((b_len, T - 1, t_dat.feats.shape[1]))
-        y_history = np.zeros((b_len, T - 1))
+        y_history = np.zeros((b_len, T - 1, t_dat.targs.shape[1]))
 
         for b_i, b_idx in enumerate(batch_idx):
             if on_train:
@@ -176,7 +181,7 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
 
         y_history = numpy_to_tvar(y_history)
         _, input_encoded = t_net.encoder(numpy_to_tvar(X))
-        y_pred[y_slc] = t_net.decoder(input_encoded, y_history).cpu().data.numpy()[:, 0]
+        y_pred[y_slc] = t_net.decoder(input_encoded, y_history).cpu().data.numpy()
 
     return y_pred
 
@@ -186,10 +191,11 @@ debug = False
 
 raw_data = pd.read_csv(os.path.join('data/nasdaq100_padding.csv'), nrows=100 if debug else None)
 logger.info(f"Shape of data: {raw_data.shape}.\nMissing in data: {raw_data.isnull().sum().sum()}.")
-data, scaler = preprocess_data(raw_data)
+targ_cols = ("NDX",)
+data, scaler = preprocess_data(raw_data, targ_cols)
 
 da_rnn_kwargs = {"batch_size": 128, "T": 10}
-config, model = da_rnn(data, learning_rate=.001, **da_rnn_kwargs)
+config, model = da_rnn(data, n_targs=len(targ_cols), learning_rate=.001, **da_rnn_kwargs)
 iter_loss, epoch_loss = train(model, data, config, n_epochs=10, save_plots=save_plots)
 final_y_pred = predict(model, data, config.train_size, config.batch_size, config.T)
 
