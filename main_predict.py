@@ -14,27 +14,29 @@ from custom_types import TrainData
 from constants import device
 
 
-def preprocess_data(dat, scale) -> TrainData:
+def preprocess_data(dat, col_names, scale) -> TrainData:
     proc_dat = scale.transform(dat)
 
-    col_idx = list(dat.columns).index("NDX")
     mask = np.ones(proc_dat.shape[1], dtype=bool)
-    mask[col_idx] = False
+    dat_cols = list(dat.columns)
+    for col_name in col_names:
+        mask[dat_cols.index(col_name)] = False
+
     feats = proc_dat[:, mask]
     targs = proc_dat[:, ~mask]
 
-    return TrainData(feats, targs.squeeze())
+    return TrainData(feats, targs)
 
 
 def predict(encoder, decoder, t_dat, batch_size: int, T: int) -> np.ndarray:
-    y_pred = np.zeros(t_dat.feats.shape[0] - T + 1)
+    y_pred = np.zeros((t_dat.feats.shape[0] - T + 1, t_dat.targs.shape[0]))
 
     for y_i in range(0, len(y_pred), batch_size):
         y_slc = slice(y_i, y_i + batch_size)
         batch_idx = range(len(y_pred))[y_slc]
         b_len = len(batch_idx)
         X = np.zeros((b_len, T - 1, t_dat.feats.shape[1]))
-        y_history = np.zeros((b_len, T - 1))
+        y_history = np.zeros((b_len, T - 1, t_dat.targs.shape[0]))
 
         for b_i, b_idx in enumerate(batch_idx):
             idx = range(b_idx, b_idx + T - 1)
@@ -44,7 +46,7 @@ def predict(encoder, decoder, t_dat, batch_size: int, T: int) -> np.ndarray:
 
         y_history = numpy_to_tvar(y_history)
         _, input_encoded = encoder(numpy_to_tvar(X))
-        y_pred[y_slc] = decoder(input_encoded, y_history).cpu().data.numpy()[:, 0]
+        y_pred[y_slc] = decoder(input_encoded, y_history).cpu().data.numpy()
 
     return y_pred
 
@@ -64,7 +66,8 @@ dec.load_state_dict(torch.load(os.path.join("data", "decoder.torch"), map_locati
 
 scaler = joblib.load(os.path.join("data", "scaler.pkl"))
 raw_data = pd.read_csv(os.path.join("data", "nasdaq100_padding.csv"), nrows=100 if debug else None)
-data = preprocess_data(raw_data, scaler)
+targ_cols = ("NDX",)
+data = preprocess_data(raw_data, targ_cols, scaler)
 
 with open(os.path.join("data", "da_rnn_kwargs.json"), "r") as fi:
     da_rnn_kwargs = json.load(fi)

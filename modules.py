@@ -63,11 +63,6 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
 
     def __init__(self, encoder_hidden_size: int, decoder_hidden_size: int, T: int, out_feats=1):
-        """
-        encoder_hidden_size: hidden_size of encoder layer
-        decoder_hidden_size:
-        T:
-        """
         super(Decoder, self).__init__()
 
         self.T = T
@@ -93,7 +88,7 @@ class Decoder(nn.Module):
         context = Variable(torch.zeros(input_encoded.size(0), self.encoder_hidden_size))
 
         for t in range(self.T - 1):
-            # (batch_size, T, (2*decoder_hidden_size + encoder_hidden_size))
+            # (batch_size, T, (2 * decoder_hidden_size + encoder_hidden_size))
             x = torch.cat((hidden.repeat(self.T - 1, 1, 1).permute(1, 0, 2),
                            cell.repeat(self.T - 1, 1, 1).permute(1, 0, 2),
                            input_encoded), dim=2)
@@ -102,13 +97,13 @@ class Decoder(nn.Module):
                     self.attn_layer(
                         x.view(-1, 2 * self.decoder_hidden_size + self.encoder_hidden_size)
                     ).view(-1, self.T - 1),
-                    dim=1)  # (batch_size, T - 1), attention weights sum up to 1
+                    dim=1)  # (batch_size, T - 1)
 
             # Eqn. 14: compute context vector
             context = torch.bmm(x.unsqueeze(1), input_encoded)[:, 0, :]  # (batch_size, encoder_hidden_size)
 
             # Eqn. 15
-            y_tilde = self.fc(torch.cat((context, y_history[:, t]), dim=1))  # batch_size * 1
+            y_tilde = self.fc(torch.cat((context, y_history[:, t]), dim=1))  # (batch_size, out_size)
             # Eqn. 16: LSTM
             self.lstm_layer.flatten_parameters()
             _, lstm_output = self.lstm_layer(y_tilde.unsqueeze(0), (hidden, cell))

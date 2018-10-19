@@ -120,7 +120,7 @@ def prep_train_data(batch_idx: np.ndarray, t_cfg: TrainConfig, train_data: Train
     y_target = train_data.targs[batch_idx + t_cfg.T]
 
     for b_i, b_idx in enumerate(batch_idx):
-        b_slc = slice(b_idx, (b_idx + t_cfg.T - 1))
+        b_slc = slice(b_idx, b_idx + t_cfg.T - 1)
         feats[b_i, :, :] = train_data.feats[b_slc, :]
         y_history[b_i, :] = train_data.targs[b_slc]
 
@@ -149,9 +149,6 @@ def train_iteration(t_net: DaRnnNet, loss_func: typing.Callable, X, y_history, y
 
     t_net.enc_opt.step()
     t_net.dec_opt.step()
-
-    # if loss.data[0] < 10:
-    #     self.logger.info("MSE: %s, loss: %s.", loss.data, (y_pred[:, 0] - y_true).pow(2).mean())
 
     return loss.item()
 
@@ -189,7 +186,7 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
 save_plots = True
 debug = False
 
-raw_data = pd.read_csv(os.path.join('data/nasdaq100_padding.csv'), nrows=100 if debug else None)
+raw_data = pd.read_csv(os.path.join("data", "nasdaq100_padding.csv"), nrows=100 if debug else None)
 logger.info(f"Shape of data: {raw_data.shape}.\nMissing in data: {raw_data.isnull().sum().sum()}.")
 targ_cols = ("NDX",)
 data, scaler = preprocess_data(raw_data, targ_cols)
