@@ -29,14 +29,14 @@ def preprocess_data(dat, col_names, scale) -> TrainData:
 
 
 def predict(encoder, decoder, t_dat, batch_size: int, T: int) -> np.ndarray:
-    y_pred = np.zeros((t_dat.feats.shape[0] - T + 1, t_dat.targs.shape[0]))
+    y_pred = np.zeros((t_dat.feats.shape[0] - T + 1, t_dat.targs.shape[1]))
 
     for y_i in range(0, len(y_pred), batch_size):
         y_slc = slice(y_i, y_i + batch_size)
         batch_idx = range(len(y_pred))[y_slc]
         b_len = len(batch_idx)
         X = np.zeros((b_len, T - 1, t_dat.feats.shape[1]))
-        y_history = np.zeros((b_len, T - 1, t_dat.targs.shape[0]))
+        y_history = np.zeros((b_len, T - 1, t_dat.targs.shape[1]))
 
         for b_i, b_idx in enumerate(batch_idx):
             idx = range(b_idx, b_idx + T - 1)
