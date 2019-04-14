@@ -28,17 +28,13 @@ def preprocess_data(dat, col_names, scale=None) -> Tuple[TrainData, StandardScal
         scale = StandardScaler().fit(dat)
     proc_dat = scale.transform(dat)
 
-    feats = proc_dat
-    targs = np.zeros((proc_dat.shape[0], len(col_names)))
+    mask = np.ones(proc_dat.shape[1], dtype=bool)
+    dat_cols = list(dat.columns)
+    for col_name in col_names:
+        mask[dat_cols.index(col_name)] = False
 
-    if all(col_name in dat for col_name in col_names):  # Assume targets are known
-        mask = np.ones(proc_dat.shape[1], dtype=bool)
-        dat_cols = list(dat.columns)
-        for col_name in col_names:
-            mask[dat_cols.index(col_name)] = False
-
-        feats = proc_dat[:, mask]
-        targs = proc_dat[:, ~mask]
+    feats = proc_dat[:, mask]
+    targs = proc_dat[:, ~mask]
 
     return TrainData(feats, targs), scale
 
