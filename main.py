@@ -183,36 +183,37 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
     return y_pred
 
 
-save_plots = True
-debug = False
+if __name__ == "__main__":
+    save_plots = True
+    debug = False
 
-raw_data = pd.read_csv(os.path.join("data", "nasdaq100_padding.csv"), nrows=100 if debug else None)
-logger.info(f"Shape of data: {raw_data.shape}.\nMissing in data: {raw_data.isnull().sum().sum()}.")
-targ_cols = ("NDX",)
-data, scaler = preprocess_data(raw_data, targ_cols)
+    raw_data = pd.read_csv(os.path.join("data", "nasdaq100_padding.csv"), nrows=100 if debug else None)
+    logger.info(f"Shape of data: {raw_data.shape}.\nMissing in data: {raw_data.isnull().sum().sum()}.")
+    targ_cols = ("NDX",)
+    data, scaler = preprocess_data(raw_data, targ_cols)
 
-da_rnn_kwargs = {"batch_size": 128, "T": 10}
-config, model = da_rnn(data, n_targs=len(targ_cols), learning_rate=.001, **da_rnn_kwargs)
-iter_loss, epoch_loss = train(model, data, config, n_epochs=10, save_plots=save_plots)
-final_y_pred = predict(model, data, config.train_size, config.batch_size, config.T)
+    da_rnn_kwargs = {"batch_size": 128, "T": 10}
+    config, model = da_rnn(data, n_targs=len(targ_cols), learning_rate=.001, **da_rnn_kwargs)
+    iter_loss, epoch_loss = train(model, data, config, n_epochs=10, save_plots=save_plots)
+    final_y_pred = predict(model, data, config.train_size, config.batch_size, config.T)
 
-plt.figure()
-plt.semilogy(range(len(iter_loss)), iter_loss)
-utils.save_or_show_plot("iter_loss.png", save_plots)
+    plt.figure()
+    plt.semilogy(range(len(iter_loss)), iter_loss)
+    utils.save_or_show_plot("iter_loss.png", save_plots)
 
-plt.figure()
-plt.semilogy(range(len(epoch_loss)), epoch_loss)
-utils.save_or_show_plot("epoch_loss.png", save_plots)
+    plt.figure()
+    plt.semilogy(range(len(epoch_loss)), epoch_loss)
+    utils.save_or_show_plot("epoch_loss.png", save_plots)
 
-plt.figure()
-plt.plot(final_y_pred, label='Predicted')
-plt.plot(data.targs[config.train_size:], label="True")
-plt.legend(loc='upper left')
-utils.save_or_show_plot("final_predicted.png", save_plots)
+    plt.figure()
+    plt.plot(final_y_pred, label='Predicted')
+    plt.plot(data.targs[config.train_size:], label="True")
+    plt.legend(loc='upper left')
+    utils.save_or_show_plot("final_predicted.png", save_plots)
 
-with open(os.path.join("data", "da_rnn_kwargs.json"), "w") as fi:
-    json.dump(da_rnn_kwargs, fi, indent=4)
+    with open(os.path.join("data", "da_rnn_kwargs.json"), "w") as fi:
+        json.dump(da_rnn_kwargs, fi, indent=4)
 
-joblib.dump(scaler, os.path.join("data", "scaler.pkl"))
-torch.save(model.encoder.state_dict(), os.path.join("data", "encoder.torch"))
-torch.save(model.decoder.state_dict(), os.path.join("data", "decoder.torch"))
+    joblib.dump(scaler, os.path.join("data", "scaler.pkl"))
+    torch.save(model.encoder.state_dict(), os.path.join("data", "encoder.torch"))
+    torch.save(model.decoder.state_dict(), os.path.join("data", "decoder.torch"))
