@@ -23,17 +23,22 @@ logger = utils.setup_log()
 logger.info(f"Using computation device: {device}")
 
 
-def preprocess_data(dat, col_names) -> Tuple[TrainData, StandardScaler]:
-    scale = StandardScaler().fit(dat)
+def preprocess_data(dat, col_names, scale=None) -> Tuple[TrainData, StandardScaler]:
+    if scale is None:
+        scale = StandardScaler().fit(dat)
     proc_dat = scale.transform(dat)
 
-    mask = np.ones(proc_dat.shape[1], dtype=bool)
-    dat_cols = list(dat.columns)
-    for col_name in col_names:
-        mask[dat_cols.index(col_name)] = False
+    feats = proc_dat
+    targs = np.zeros(proc_dat.shape[0])
 
-    feats = proc_dat[:, mask]
-    targs = proc_dat[:, ~mask]
+    if not col_names:
+        mask = np.ones(proc_dat.shape[1], dtype=bool)
+        dat_cols = list(dat.columns)
+        for col_name in col_names:
+            mask[dat_cols.index(col_name)] = False
+
+        feats = proc_dat[:, mask]
+        targs = proc_dat[:, ~mask]
 
     return TrainData(feats, targs), scale
 
