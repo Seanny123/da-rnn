@@ -106,3 +106,9 @@ venv.bak/
 .mypy_cache/
 
 .idea
+
+# Data
+data/
+
+# Except the NASDAQ100 dataset
+!data/nasdaq100_padding.csv
