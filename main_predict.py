@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from sklearn.externals import joblib
 
 from modules import Encoder, Decoder
-from utils import numpy_to_tvar
+from utils import numpyt_to_tensor
 import utils
 from custom_types import TrainData
 from constants import device
@@ -44,8 +44,8 @@ def predict(encoder, decoder, t_dat, batch_size: int, T: int) -> np.ndarray:
             X[b_i, :, :] = t_dat.feats[idx, :]
             y_history[b_i, :] = t_dat.targs[idx]
 
-        y_history = numpy_to_tvar(y_history)
-        _, input_encoded = encoder(numpy_to_tvar(X))
+        y_history = numpyt_to_tensor(y_history)
+        _, input_encoded = encoder(numpyt_to_tensor(X))
         y_pred[y_slc] = decoder(input_encoded, y_history).cpu().data.numpy()
 
     return y_pred

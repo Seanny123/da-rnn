@@ -16,7 +16,7 @@ import numpy as np
 import utils
 from modules import Encoder, Decoder
 from custom_types import DaRnnNet, TrainData, TrainConfig
-from utils import numpy_to_tvar
+from utils import numpyt_to_tensor
 from constants import device
 
 logger = utils.setup_log()
@@ -140,10 +140,10 @@ def train_iteration(t_net: DaRnnNet, loss_func: typing.Callable, X, y_history, y
     t_net.enc_opt.zero_grad()
     t_net.dec_opt.zero_grad()
 
-    input_weighted, input_encoded = t_net.encoder(numpy_to_tvar(X))
-    y_pred = t_net.decoder(input_encoded, numpy_to_tvar(y_history))
+    input_weighted, input_encoded = t_net.encoder(numpyt_to_tensor(X))
+    y_pred = t_net.decoder(input_encoded, numpyt_to_tensor(y_history))
 
-    y_true = numpy_to_tvar(y_target)
+    y_true = numpyt_to_tensor(y_target)
     loss = loss_func(y_pred, y_true)
     loss.backward()
 
@@ -176,8 +176,8 @@ def predict(t_net: DaRnnNet, t_dat: TrainData, train_size: int, batch_size: int,
             X[b_i, :, :] = t_dat.feats[idx, :]
             y_history[b_i, :] = t_dat.targs[idx]
 
-        y_history = numpy_to_tvar(y_history)
-        _, input_encoded = t_net.encoder(numpy_to_tvar(X))
+        y_history = numpyt_to_tensor(y_history)
+        _, input_encoded = t_net.encoder(numpyt_to_tensor(X))
         y_pred[y_slc] = t_net.decoder(input_encoded, y_history).cpu().data.numpy()
 
     return y_pred
