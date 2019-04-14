@@ -115,14 +115,14 @@ def train(net: DaRnnNet, train_data: TrainData, t_cfg: TrainConfig, n_epochs=10,
 
 
 def prep_train_data(batch_idx: np.ndarray, t_cfg: TrainConfig, train_data: TrainData):
-    feats = np.zeros((len(batch_idx), t_cfg.T - 1, train_data.feats.shape[1]))
+    feats = np.zeros((len(batch_idx), t_cfg.T, train_data.feats.shape[1]))
     y_history = np.zeros((len(batch_idx), t_cfg.T - 1, train_data.targs.shape[1]))
     y_target = train_data.targs[batch_idx + t_cfg.T]
 
     for b_i, b_idx in enumerate(batch_idx):
-        b_slc = slice(b_idx, b_idx + t_cfg.T - 1)
-        feats[b_i, :, :] = train_data.feats[b_slc, :]
-        y_history[b_i, :] = train_data.targs[b_slc]
+        start, stop = b_idx, b_idx + t_cfg.T
+        feats[b_i, :, :] = train_data.feats[start : stop, :]
+        y_history[b_i, :] = train_data.targs[start : stop - 1]
 
     return feats, y_history, y_target
 
