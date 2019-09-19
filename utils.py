@@ -3,7 +3,6 @@ import os
 
 import matplotlib.pyplot as plt
 import torch
-from torch.autograd import Variable
 
 from constants import device
 
@@ -34,5 +33,5 @@ def save_or_show_plot(file_nm: str, save: bool):
         plt.show()
 
 
-def numpy_to_tvar(x):
-    return Variable(torch.from_numpy(x).type(torch.FloatTensor).to(device))
+def numpy_to_tensor(x):
+    return torch.from_numpy(x).type(torch.FloatTensor).to(device)
