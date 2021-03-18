@@ -22,7 +22,7 @@ from constants import device
 logger = utils.setup_log()
 logger.info(f"Using computation device: {device}")
 
-
+# Wadee Hi
 def preprocess_data(dat, col_names) -> Tuple[TrainData, StandardScaler]:
     scale = StandardScaler().fit(dat)
     proc_dat = scale.transform(dat)
