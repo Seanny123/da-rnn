@@ -4,6 +4,7 @@ import typing
 import numpy as np
 
 
+#  Hisdasdasd
 class TrainConfig(typing.NamedTuple):
     T: int
     train_size: int
